@@ -406,6 +406,22 @@ async def on_ready():
     await bot.tree.sync()
     print(f"Бот успешно запущен как {bot.user}")
 
+
+    import http.server
+import socketserver
+import threading
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 10000))
+    handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", port), handler) as httpd:
+        httpd.serve_forever()
+
 if __name__ == "__main__":
+    # Запускаем фоновый веб-сервер для Render
+    threading.Thread(target=run_web_server, daemon=True).start()
+    
+    # Запускаем бота Discord
     bot.run(TOKEN)
+
 ```
