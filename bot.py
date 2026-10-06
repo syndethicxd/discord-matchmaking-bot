@@ -422,5 +422,3 @@ if __name__ == "__main__":
     
     # Запускаем бота Discord
     bot.run(TOKEN)
-
-```
