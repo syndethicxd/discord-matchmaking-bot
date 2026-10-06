@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 TOKEN = os.getenv("DISCORD_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 
 # Укажи ID своего закрытого канала для модераторов!
-MODERATOR_CHANNEL_ID = 123456789012345678  
+MODERATOR_CHANNEL_ID = 1557114424576319598
 
 DATABASE_URL = "sqlite+aiosqlite:///matchmaking.db"
 
