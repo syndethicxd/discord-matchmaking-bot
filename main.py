@@ -444,4 +444,54 @@ async def leaderboard(interaction: discord.Interaction):
 
 @bot.tree.command(name="fix_pts", description="Изменить количество PTS игрока")
 @is_matchmaking_mod()
-async def
+async def fix_pts(interaction: discord.Interaction, user: discord.User, pts: int):
+    stats = get_user_stats(user.id)
+    stats["pts"] = pts
+    await interaction.response.send_message(f"✅ Для пользователя {user.mention} установлено **{pts} PTS**.", ephemeral=True)
+@bot.tree.command(name="fix_stats", description="Изменить победы и поражения игрока")
+@is_matchmaking_mod()
+async def fix_stats(interaction: discord.Interaction, user: discord.User, wins: int, losses: int):
+    stats = get_user_stats(user.id)
+    stats["wins"] = wins
+    stats["losses"] = losses
+    total = wins + losses
+    wr = calculate_winrate(wins, losses)
+    await interaction.response.send_message(
+        f"✅ Статистика {user.mention} изменена:\n"
+        f"• Победы: **{wins}**\n• Поражения: **{losses}**\n• Всего игр: **{total}**\n• Винрейт: **{wr}%**",
+        ephemeral=True
+    )
+
+@bot.tree.command(name="deleted_channel", description="Удалить указанный канал")
+@is_matchmaking_mod()
+async def deleted_channel(interaction: discord.Interaction, channel_name_or_mention: str):
+    guild = interaction.guild
+    clean_input = channel_name_or_mention.strip("<#> ").lower()
+    target_channel = None
+
+    for ch in guild.channels:
+        if str(ch.id) == clean_input or ch.name.lower() == clean_input:
+            target_channel = ch
+            break
+
+    if not target_channel:
+        await interaction.response.send_message(f"Канал {channel_name_or_mention} не найден.", ephemeral=True)
+        return
+
+    try:
+        ch_name = target_channel.name
+        await target_channel.delete(reason=f"Удалено администратором {interaction.user.display_name}")
+        await interaction.response.send_message(f"✅ Канал #{ch_name} успешно удалён.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Ошибка при удалении канала: {e}", ephemeral=True)
+
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+if __name__ == "__main__":
+    threading.Thread(target=run_health_check_server, daemon=True).start()
+    if TOKEN:
+        print(">>> Токен найден, запускаем бота...")
+        bot.run(TOKEN)
+    else:
+        print("❌ КРИТИЧЕСКАЯ ОШИБКА: Переменная DISCORD_TOKEN не найдена в Environment Variables!")
+                                                
