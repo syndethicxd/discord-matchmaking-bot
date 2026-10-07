@@ -126,7 +126,6 @@ class VerdictModal(discord.ui.Modal, title="Вердикт проверки"):
             )
         )
 
-        # ЛОГ: Вынесение вердикта
         await send_log(
             guild=interaction.guild,
             title="🔍 Лог: Завершение проверки",
@@ -180,7 +179,6 @@ class ModProofReviewView(discord.ui.View):
         stats["pts"] += 15
         stats["wins"] += 1
 
-        # Проверка и выдача роли herald при достижении 100 Pts
         await check_and_grant_herald_role(self.winner, stats["pts"])
 
         for p in self.players:
@@ -199,7 +197,6 @@ class ModProofReviewView(discord.ui.View):
 
         await interaction.response.send_message(f"✅ Результат одобрен. +15 Pts выслано {self.winner.mention}.", ephemeral=True)
 
-        # ЛОГ: Одобрение матча со списком всех игроков
         players_str = " vs ".join([p.mention for p in self.players])
         await send_log(
             guild=interaction.guild,
@@ -233,7 +230,6 @@ class ModProofReviewView(discord.ui.View):
 
         await interaction.response.send_message("❌ Доказательство отклонено.", ephemeral=True)
 
-        # ЛОГ: Отклонение матча со списком всех игроков
         players_str = " vs ".join([p.mention for p in self.players])
         await send_log(
             guild=interaction.guild,
@@ -285,7 +281,6 @@ class ModProofReviewView(discord.ui.View):
 
         await interaction.response.send_message(f"🚨 Игрок {self.winner.mention} вызван на проверку! Канал: {check_channel.mention}", ephemeral=True)
 
-        # ЛОГ: Указано, что именно Матч №... отправлен на проверку
         await send_log(
             guild=interaction.guild,
             title="🚨 Лог: Вызов на проверку",
@@ -450,4 +445,10 @@ class MatchInviteView(discord.ui.View):
         match_channel = await guild.create_text_channel(
             name=channel_name,
             overwrites=overwrites,
-            topic=f"Режим матча: [{self.mode}]
+            topic=f"Режим матча: [{self.mode}] | Локация: {self.location} | Оружие: {self.weapon}"
+        )
+
+        embed = discord.Embed(
+            title=f"⚔️ Матч #{current_match_id} начался! [{self.mode}]",
+            description=f"🎮 **Режим:** `{self.mode}`\n"
+                        f"**Участники:** {' vs '.j
