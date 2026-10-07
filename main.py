@@ -298,7 +298,6 @@ async def deleted_channel(interaction: discord.Interaction, channel_name_or_ment
         await interaction.response.send_message("Эта команда доступна только на сервере.", ephemeral=True)
         return
 
-    # Очищаем ввод от символов упоминания <#id>
     clean_input = channel_name_or_mention.strip("<#> ").lower()
 
     target_channel = None
@@ -475,3 +474,6 @@ async def profile(interaction: discord.Interaction, user: Optional[discord.User]
 
     await interaction.response.send_message(embed=embed)
 
+
+@bot.tree.command(name="leaderboard", description="Топ-10 игроков сервера")
+async def leaderboard(interaction: discord
