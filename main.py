@@ -23,6 +23,7 @@ def run_health_check_server():
     try:
         port = int(os.getenv("PORT", 8080))
         server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+        print(f">>> HTTP Сервер запущен на порту {port}")
         server.serve_forever()
     except Exception as e:
         print(f"HTTP Server Exception: {e}")
@@ -32,7 +33,6 @@ def run_health_check_server():
 # ---------------------------------------------------------------------------
 
 match_counter = 1
-
 user_data = {}
 
 def get_user_stats(user_id: int):
@@ -99,7 +99,7 @@ class MatchCancelView(discord.ui.View):
             await interaction.response.send_message("❌ Вы не можете отклонить отмену!", ephemeral=True)
             return
 
-        await interaction.response.send_message("❌ **Отмена матча отклонён.** Продолжайте игру!", ephemeral=True)
+        await interaction.response.send_message("❌ **Запрос на отмену отклонён.** Продолжайте игру!", ephemeral=True)
         self.stop()
 
 class ActiveMatchView(discord.ui.View):
@@ -442,11 +442,6 @@ async def leaderboard(interaction: discord.Interaction):
     embed.description = "\n".join(lines)
     await interaction.response.send_message(embed=embed)
 
-
 @bot.tree.command(name="fix_pts", description="Изменить количество PTS игрока")
 @is_matchmaking_mod()
-async def fix_pts(interaction: discord.Interaction, user: discord.User, pts: int):
-    stats = get_user_stats(user.id)
-    stats["pts"] = pts
-    await interaction.response.send_message(f"✅ Для пользователя {user.mention} установлено **{pts} PTS**.", ephemeral=True)
-    
+async def
