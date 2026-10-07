@@ -11,10 +11,10 @@ from discord.ext import commands
 # CONFIGURATION
 # ---------------------------------------------------------------------------
 MOD_ROLE_NAME = "matchmaking mod"
-HERALD_ROLE_NAME = "herald"  # Роль, выдаваемая при достижении 100 Pts
+HERALD_ROLE_NAME = "herald"
 
-MOD_PROOF_CHANNEL_ID = 1557114424576319598  # ID канала для модерации доказательств
-LOG_CHANNEL_ID = 1557311338378694667        # ID канала для логов действий
+MOD_PROOF_CHANNEL_ID = 1557114424576319598  # Замени на ID своего канала
+LOG_CHANNEL_ID = 1557311338378694667        # Замени на ID своего канала
 
 # ---------------------------------------------------------------------------
 # HTTP SERVER FOR RENDER
@@ -107,7 +107,7 @@ class VerdictModal(discord.ui.Modal, title="Вердикт проверки"):
     verdict = discord.ui.TextInput(
         label="Вердикт",
         style=discord.TextStyle.paragraph,
-        placeholder="Введите вердикт (например: Оправдан / Забанен за софт)...",
+        placeholder="Введите вердикт (например: Оправдан / Забанен)...",
         required=True,
         max_length=1000
     )
@@ -197,7 +197,11 @@ class ModProofReviewView(discord.ui.View):
 
         await interaction.response.send_message(f"✅ Результат одобрен. +15 Pts выслано {self.winner.mention}.", ephemeral=True)
 
-        players_str = " vs ".join([p.mention for p in self.players])
+        players_mentions = []
+        for p in self.players:
+            players_mentions.append(p.mention)
+        players_str = " vs ".join(players_mentions)
+
         await send_log(
             guild=interaction.guild,
             title="✅ Лог: Матч одобрен",
@@ -230,7 +234,11 @@ class ModProofReviewView(discord.ui.View):
 
         await interaction.response.send_message("❌ Доказательство отклонено.", ephemeral=True)
 
-        players_str = " vs ".join([p.mention for p in self.players])
+        players_mentions = []
+        for p in self.players:
+            players_mentions.append(p.mention)
+        players_str = " vs ".join(players_mentions)
+
         await send_log(
             guild=interaction.guild,
             title="❌ Лог: Матч отклонён",
@@ -243,5 +251,214 @@ class ModProofReviewView(discord.ui.View):
         )
 
         if self.match_channel:
-            try
-            
+            try:
+                await self.match_channel.send("❌ **Доказательства отклонены модерацией. Канал будет удалён через 7 секунд...**")
+                await asyncio.sleep(7)
+                await self.match_channel.delete(reason="Матч отклонен модерацией")
+            except Exception as e:
+                print(f"Ошибка удаления канала: {e}")
+
+    @discord.ui.button(label="Проверка", style=discord.ButtonStyle.primary, custom_id="mod_check_proof")
+    async def start_check(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild = interaction.guild
+        mod_role = discord.utils.find(lambda r: r.name.lower() == MOD_ROLE_NAME.lower(), guild.roles)
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            self.winner: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+        }
+        if mod_role:
+            overwrites[mod_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+        check_channel_name = f"check-{self.match_id}"
+        check_channel = await guild.create_text_channel(
+            name=check_channel_name,
+            overwrites=overwrites,
+            topic=f"Проверка игрока {self.winner.display_name} по матчу #{self.match_id}"
+        )
+
+        embed = discord.Embed(
+            title="🔍 ВЫЗОВ НА ПРОВЕРКУ",
+            description="Уважаемый игрок, у вас есть 24 часа на предоставление доказательств о том что вы чист.",
+            color=discord.Color.orange()
+        )
+
+        view = CheckControlView(target_user=self.winner, match_id=self.match_id)
+        await check_channel.send(content=self.winner.mention, embed=embed, view=view)
+
+        await interaction.response.send_message(f"🚨 Игрок {self.winner.mention} вызван на проверку! Канал: {check_channel.mention}", ephemeral=True)
+
+        await send_log(
+            guild=interaction.guild,
+            title="🚨 Лог: Вызов на проверку",
+            description=f"**Модератор:** {interaction.user.mention}\n"
+                        f"**Матч №:** `{self.match_id}` был отправлен на проверку\n"
+                        f"**Игрок на проверке:** {self.winner.mention}\n"
+                        f"**Канал проверки:** {check_channel.mention}",
+            color=discord.Color.gold()
+        )
+
+# ---------------------------------------------------------------------------
+# MODALS & VIEWS FOR MATCH
+# ---------------------------------------------------------------------------
+
+class YoutubeProofModal(discord.ui.Modal, title="Завершение дуэли"):
+    youtube_url = discord.ui.TextInput(
+        label="Ссылка на YouTube (доказательство)",
+        placeholder="https://www.youtube.com/watch?v=...",
+        required=True,
+        min_length=10
+    )
+
+    def __init__(self, winner: discord.Member, players: list[discord.User], weapon: str, location: str, match_channel: discord.TextChannel, match_id: int):
+        super().__init__()
+        self.winner = winner
+        self.players = players
+        self.weapon = weapon
+        self.location = location
+        self.match_channel = match_channel
+        self.match_id = match_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        mod_channel = guild.get_channel(MOD_PROOF_CHANNEL_ID)
+
+        if not mod_channel:
+            await interaction.response.send_message("❌ Ошибка: Канал доказательств не найден! Обратитесь к администратору.", ephemeral=True)
+            return
+
+        players_mentions = []
+        for p in self.players:
+            players_mentions.append(p.mention)
+        players_str = " vs ".join(players_mentions)
+
+        embed = discord.Embed(
+            title=f"📥 Новая заявка на проверку дуэли #{self.match_id}",
+            color=discord.Color.gold()
+        )
+        embed.add_field(name="👥 Игроки", value=players_str, inline=False)
+        embed.add_field(name="🏆 Победитель (заявлен)", value=self.winner.mention, inline=True)
+        embed.add_field(name="🔫 Оружие", value=self.weapon, inline=True)
+        embed.add_field(name="📍 Карта", value=self.location, inline=True)
+        embed.add_field(name="🎥 Доказательство", value=self.youtube_url.value, inline=False)
+
+        review_view = ModProofReviewView(
+            winner=self.winner,
+            players=self.players,
+            weapon=self.weapon,
+            location=self.location,
+            proof_url=self.youtube_url.value,
+            match_channel=self.match_channel,
+            match_id=self.match_id
+        )
+
+        await mod_channel.send(embed=embed, view=review_view)
+        await interaction.response.send_message("✅ Доказательство успешно отправлено модераторам! Ожидайте решения.", ephemeral=True)
+
+class MatchCancelView(discord.ui.View):
+    def __init__(self, allowed_users: list[discord.User]):
+        super().__init__(timeout=300)
+        self.allowed_users = allowed_users
+
+    @discord.ui.button(label="Принять отмену", style=discord.ButtonStyle.success)
+    async def accept_cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        allowed_ids = [u.id for u in self.allowed_users]
+        if interaction.user.id not in allowed_ids:
+            await interaction.response.send_message("❌ Вы не можете подтвердить отмену!", ephemeral=True)
+            return
+
+        await interaction.response.send_message("⛔ **Матч отменён. Канал будет удалён через 7 секунд...**")
+        self.stop()
+        
+        await asyncio.sleep(7)
+        try:
+            await interaction.channel.delete(reason="Матч отменен игроками")
+        except Exception as e:
+            print(f"Ошибка удаления: {e}")
+
+    @discord.ui.button(label="Отклонить отмену", style=discord.ButtonStyle.secondary)
+    async def decline_cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        allowed_ids = [u.id for u in self.allowed_users]
+        if interaction.user.id not in allowed_ids:
+            await interaction.response.send_message("❌ Вы не можете отклонить отмену!", ephemeral=True)
+            return
+
+        await interaction.response.send_message("❌ **Запрос на отмену отклонён.** Продолжайте игру!", ephemeral=True)
+        self.stop()
+
+class ActiveMatchView(discord.ui.View):
+    def __init__(self, players: list[discord.User], weapon: str, location: str, match_id: int):
+        super().__init__(timeout=None)
+        self.players = players
+        self.weapon = weapon
+        self.location = location
+        self.match_id = match_id
+
+    @discord.ui.button(label="Отмена матча", style=discord.ButtonStyle.danger, custom_id="active_match_cancel")
+    async def request_cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        player_ids = [p.id for p in self.players]
+        if interaction.user.id not in player_ids:
+            await interaction.response.send_message("❌ Вы не являетесь участником матча!", ephemeral=True)
+            return
+
+        opponents = []
+        for p in self.players:
+            if p.id != interaction.user.id:
+                opponents.append(p)
+
+        opponents_mentions = " ".join([p.mention for p in opponents])
+        
+        view = MatchCancelView(allowed_users=opponents)
+        await interaction.response.send_message(
+            f"⚠️ {interaction.user.mention} запросил отмену матча. {opponents_mentions}, вы согласны?",
+            view=view
+        )
+
+    @discord.ui.button(label="Завершить дуэль", style=discord.ButtonStyle.success, custom_id="active_match_finish")
+    async def finish_match(self, interaction: discord.Interaction, button: discord.ui.Button):
+        player_ids = [p.id for p in self.players]
+        if interaction.user.id not in player_ids:
+            await interaction.response.send_message("❌ Вы не являетесь участником матча!", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(
+            YoutubeProofModal(
+                winner=interaction.user,
+                players=self.players,
+                weapon=self.weapon,
+                location=self.location,
+                match_channel=interaction.channel,
+                match_id=self.match_id
+            )
+        )
+
+class MatchInviteView(discord.ui.View):
+    def __init__(self, challenger: discord.User, players: list[discord.User], location: str, weapon: str, mode: str):
+        super().__init__(timeout=600)
+        self.challenger = challenger
+        self.players = players
+        self.location = location
+        self.weapon = weapon
+        self.mode = mode
+
+    @discord.ui.button(label="Принять", style=discord.ButtonStyle.success)
+    async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
+        global match_counter
+        invited_ids = [p.id for p in self.players if p.id != self.challenger.id]
+        if interaction.user.id not in invited_ids:
+            await interaction.response.send_message("❌ Вызов адресован не вам!", ephemeral=True)
+            return
+
+        guild = interaction.guild
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True, manage_channels=True)
+        }
+
+        for player in self.players:
+            overwrites[player] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+        current_match_id = match_counter
+        channel_name = f"match-{current_match_id}"
+        match_counter += 1
