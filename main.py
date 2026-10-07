@@ -442,6 +442,11 @@ async def leaderboard(interaction: discord.Interaction):
     embed.description = "\n".join(lines)
     await interaction.response.send_message(embed=embed)
 
+
 @bot.tree.command(name="fix_pts", description="Изменить количество PTS игрока")
 @is_matchmaking_mod()
-async def fix_pts(interaction: discord.Interaction, user: discord.User
+async def fix_pts(interaction: discord.Interaction, user: discord.User, pts: int):
+    stats = get_user_stats(user.id)
+    stats["pts"] = pts
+    await interaction.response.send_message(f"✅ Для пользователя {user.mention} установлено **{pts} PTS**.", ephemeral=True)
+    
