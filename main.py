@@ -7,7 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 
 # ---------------------------------------------------------------------------
-# HTTP SERVER FOR RENDER (Поддержка работы на Render Web Service)
+# HTTP SERVER FOR RENDER
 # ---------------------------------------------------------------------------
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -31,7 +31,7 @@ def run_health_check_server():
 # DATA & IN-MEMORY DATABASE
 # ---------------------------------------------------------------------------
 
-match_counter = 1  # Глобальный счетчик для нумерации дуэлей (match-1, match-2...)
+match_counter = 1
 
 user_data = {}
 
@@ -50,7 +50,7 @@ def is_matchmaking_mod():
     async def predicate(interaction: discord.Interaction):
         has_role = any(role.name == "Matchmaking Mod" for role in interaction.user.roles)
         if not has_role:
-            await interaction.response.send_message("❌ У вас нет роли **Matchmaking Mod** для использования этой команды!", ephemeral=True)
+            await interaction.response.send_message("❌ У вас нет роли **Matchmaking Mod**!", ephemeral=True)
             return False
         return True
     return app_commands.check(predicate)
@@ -81,17 +81,17 @@ class MatchCancelView(discord.ui.View):
     @discord.ui.button(label="Принять отмену", style=discord.ButtonStyle.danger)
     async def accept_cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id not in [u.id for u in self.allowed_users]:
-            await interaction.response.send_message("❌ Вы не можете подтвердить отмену этого матча!", ephemeral=True)
+            await interaction.response.send_message("❌ Вы не можете подтвердить отмену!", ephemeral=True)
             return
 
-        await interaction.response.send_message("⛔ **Матч отменён по обоюдному согласию. Канал будет удалён через 7 секунд...**")
+        await interaction.response.send_message("⛔ **Матч отменён. Канал будет удалён через 7 секунд...**")
         self.stop()
         
         await asyncio.sleep(7)
         try:
-            await interaction.channel.delete(reason="Матч отменен по обоюдному согласию")
+            await interaction.channel.delete(reason="Матч отменен")
         except Exception as e:
-            print(f"Ошибка при удалении канала: {e}")
+            print(f"Ошибка удаления: {e}")
 
     @discord.ui.button(label="Отклонить отмену", style=discord.ButtonStyle.secondary)
     async def decline_cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -99,7 +99,7 @@ class MatchCancelView(discord.ui.View):
             await interaction.response.send_message("❌ Вы не можете отклонить отмену!", ephemeral=True)
             return
 
-        await interaction.response.send_message("❌ **Запрос на отмену матча отклонён.** Продолжайте игру!", ephemeral=True)
+        await interaction.response.send_message("❌ **Отмена матча отклонён.** Продолжайте игру!", ephemeral=True)
         self.stop()
 
 class ActiveMatchView(discord.ui.View):
@@ -110,7 +110,7 @@ class ActiveMatchView(discord.ui.View):
     @discord.ui.button(label="Отмена матча", style=discord.ButtonStyle.danger, custom_id="active_match_cancel")
     async def request_cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id not in [p.id for p in self.players]:
-            await interaction.response.send_message("❌ Вы не являетесь участником этого матча!", ephemeral=True)
+            await interaction.response.send_message("❌ Вы не являетесь участником матча!", ephemeral=True)
             return
 
         opponents = [p for p in self.players if p.id != interaction.user.id]
@@ -125,7 +125,7 @@ class ActiveMatchView(discord.ui.View):
     @discord.ui.button(label="Завершить дуэль", style=discord.ButtonStyle.success, custom_id="active_match_finish")
     async def finish_match(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id not in [p.id for p in self.players]:
-            await interaction.response.send_message("❌ Вы не являетесь участником этого матча!", ephemeral=True)
+            await interaction.response.send_message("❌ Вы не являетесь участником матча!", ephemeral=True)
             return
 
         await interaction.response.send_modal(YoutubeProofModal())
@@ -143,7 +143,7 @@ class MatchInviteView(discord.ui.View):
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
         global match_counter
         if interaction.user.id not in [p.id for p in self.players if p.id != self.challenger.id]:
-            await interaction.response.send_message("❌ Этот вызов адресован не вам!", ephemeral=True)
+            await interaction.response.send_message("❌ Вызов адресован не вам!", ephemeral=True)
             return
 
         guild = interaction.guild
@@ -171,16 +171,16 @@ class MatchInviteView(discord.ui.View):
         active_view = ActiveMatchView(players=self.players)
         await match_channel.send(content=" ".join([p.mention for p in self.players]), embed=embed, view=active_view)
 
-        await interaction.response.send_message(f"✅ Матч создан! Перейдите в канал {match_channel.mention}")
+        await interaction.response.send_message(f"✅ Матч создан! Перейдите в {match_channel.mention}")
         self.stop()
 
     @discord.ui.button(label="Отклонить", style=discord.ButtonStyle.danger)
     async def decline(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id not in [p.id for p in self.players if p.id != self.challenger.id]:
-            await interaction.response.send_message("❌ Этот вызов адресован не вам!", ephemeral=True)
+            await interaction.response.send_message("❌ Вызов адресован не вам!", ephemeral=True)
             return
 
-        await interaction.response.send_message(f"❌ {interaction.user.mention} отклонил вызов на матч.")
+        await interaction.response.send_message(f"❌ {interaction.user.mention} отклонил вызов.")
         self.stop()
 
 # ---------------------------------------------------------------------------
@@ -303,7 +303,7 @@ class Setup2v2View(discord.ui.View):
     @discord.ui.button(label="Отправить вызов 2v2", style=discord.ButtonStyle.primary, row=4)
     async def send_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not self.teammate_id or len(self.opponents_ids) != 2 or not self.location or not self.weapon:
-            await interaction.response.send_message("❌ Заполните все поля (1 тиммейт, 2 противника, локация и оружие)!", ephemeral=True)
+            await interaction.response.send_message("❌ Заполните все поля!", ephemeral=True)
             return
 
         teammate = interaction.guild.get_member(int(self.teammate_id))
@@ -311,7 +311,7 @@ class Setup2v2View(discord.ui.View):
         opp2 = interaction.guild.get_member(int(self.opponents_ids[1]))
 
         if not teammate or not opp1 or not opp2:
-            await interaction.response.send_message("❌ Не удалось найти всех указанных игроков на сервере.", ephemeral=True)
+            await interaction.response.send_message("❌ Не удалось найти всех игроков.", ephemeral=True)
             return
 
         players = [interaction.user, teammate, opp1, opp2]
@@ -328,7 +328,7 @@ class Setup2v2View(discord.ui.View):
 
         invite_view = MatchInviteView(challenger=interaction.user, players=players, location=self.location, weapon=self.weapon, mode="2v2")
         await interaction.channel.send(content=f"{opp1.mention} {opp2.mention}", embed=embed, view=invite_view)
-        await interaction.response.send_message("✅ Вызов на 2v2 успешно отправлен!", ephemeral=True)
+        await interaction.response.send_message("✅ Вызов на 2v2 отправлен!", ephemeral=True)
 
 # ---------------------------------------------------------------------------
 # MAIN PANEL VIEW
@@ -430,13 +430,18 @@ async def leaderboard(interaction: discord.Interaction):
         color=discord.Color.gold()
     )
 
-    description_text = ""
+    lines = []
     for rank, (u_id, stats) in enumerate(sorted_users, start=1):
         member = interaction.guild.get_member(u_id)
         name = member.display_name if member else f"User ID: {u_id}"
         total_games = stats["wins"] + stats["losses"]
         winrate = calculate_winrate(stats["wins"], stats["losses"])
-        description_text += f"**#{rank} {name}** — `{stats['pts']} PTS` | Игр: `{total_games}` | WR: `{winrate}%`\n"
+        pts = stats["pts"]
+        lines.append(f"**#{rank} {name}** — `{pts} PTS` | Игр: `{total_games}` | WR: `{winrate}%`")
 
-    embed.description = description_text
+    embed.description = "\n".join(lines)
     await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="fix_pts", description="Изменить количество PTS игрока")
+@is_matchmaking_mod()
+async def fix_pts(interaction: discord.Interaction, user: discord.User
