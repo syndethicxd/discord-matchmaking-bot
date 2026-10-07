@@ -1,120 +1,36 @@
 import os
 import json
 import asyncio
-import http.server
-import socketserver
-import threading
-from enum import Enum as PyEnum
-from datetime import datetime
 from typing import List, Optional
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Integer, String, Text, func, select, desc
-from sqlalchemy.ext.asyncio import AsyncAttrs, create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy import select, desc, func
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+
+# Импорт моделей
+from db_models import Base, User, Match, MatchStatus, RatingLog, calculate_pts_updates
 
 # --- КОНФИГУРАЦИЯ ---
-# Токен подтягивается из Environment Variables на Render
-TOKEN = os.getenv("DISCORD_BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
-MODERATION_CHANNEL_ID = 1557102218770120867  # ID канала модераторов
-
-# ⚠️ ВСТАВЬТЕ СЮДА ID СВОЕГО СЕРВЕРА DISCORD (чтобы команды зарегистрировались мгновенно)
-GUILD_ID = 1557102217058590744
-
+TOKEN = os.getenv("DISCORD_TOKEN")
+MODERATION_CHANNEL_ID = 1557102218770120867  # ID закрытого канала модераторов
 DATABASE_URL = "sqlite+aiosqlite:///matchmaking.db"
 
-# --- МОДЕЛИ БАЗЫ ДАННЫХ ---
-class MatchStatus(str, PyEnum):
-    PENDING_ACCEPT = "PENDING_ACCEPT"
-    IN_PROGRESS = "IN_PROGRESS"
-    PENDING_MODERATION = "PENDING_MODERATION"
-    COMPLETED = "COMPLETED"
-    CANCELLED = "CANCELLED"
-
-class Base(AsyncAttrs, DeclarativeBase):
-    pass
-
-class User(Base):
-    __tablename__ = "users"
-
-    discord_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
-    rating: Mapped[int] = mapped_column(Integer, default=1000, nullable=False)
-    wins: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    losses: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    rating_logs: Mapped[List["RatingLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
-
-class Match(Base):
-    __tablename__ = "matches"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    mode: Mapped[str] = mapped_column(String(10), nullable=False)
-    status: Mapped[MatchStatus] = mapped_column(Enum(MatchStatus), default=MatchStatus.PENDING_ACCEPT, nullable=False)
-    
-    team1_raw: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    team2_raw: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    
-    proof_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    thread_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    @property
-    def team1(self) -> List[int]:
-        return json.loads(self.team1_raw)
-
-    @team1.setter
-    def team1(self, value: List[int]):
-        self.team1_raw = json.dumps(value)
-
-    @property
-    def team2(self) -> List[int]:
-        return json.loads(self.team2_raw)
-
-    @team2.setter
-    def team2(self, value: List[int]):
-        self.team2_raw = json.dumps(value)
-
-class RatingLog(Base):
-    __tablename__ = "rating_logs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    match_id: Mapped[int] = mapped_column(Integer, ForeignKey("matches.id"), nullable=False)
-    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.discord_id"), nullable=False)
-    old_rating: Mapped[int] = mapped_column(Integer, nullable=False)
-    new_rating: Mapped[int] = mapped_column(Integer, nullable=False)
-    delta: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    user: Mapped["User"] = relationship(back_populates="rating_logs")
-
-async def calculate_elo_updates(
-    team1_ratings: list[int], 
-    team2_ratings: list[int], 
-    winner_team: int, 
-    k_factor: int = 32
-) -> tuple[int, int]:
-    avg_r1 = sum(team1_ratings) / len(team1_ratings)
-    avg_r2 = sum(team2_ratings) / len(team2_ratings)
-
-    expected_t1 = 1.0 / (1.0 + 10.0 ** ((avg_r2 - avg_r1) / 400.0))
-    actual_t1 = 1.0 if winner_team == 1 else 0.0
-
-    delta_t1 = round(k_factor * (actual_t1 - expected_t1))
-    delta_t2 = -delta_t1
-
-    return delta_t1, delta_t2
+# Названия ролей
+HERALD_ROLE_NAME = "herald"
+MOD_ROLE_NAME = "matchmaking mod"
 
 # --- НАСТРОЙКА БАЗЫ ДАННЫХ ---
 engine = create_async_engine(DATABASE_URL, echo=False)
 async_session = async_sessionmaker(engine, expire_on_commit=False)
 
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
 
 async def get_or_create_user(session: AsyncSession, discord_id: int) -> User:
     result = await session.execute(select(User).where(User.discord_id == discord_id))
@@ -125,7 +41,39 @@ async def get_or_create_user(session: AsyncSession, discord_id: int) -> User:
         await session.commit()
     return user
 
-# --- MODALS & VIEWS ---
+
+async def check_and_assign_herald_role(guild: discord.Guild, user_id: int, rating: int):
+    """Проверяет рейтинг и выдает роль Herald, если rating >= 100"""
+    if rating >= 100 and guild:
+        member = guild.get_member(user_id)
+        if member:
+            role = discord.utils.find(lambda r: r.name.lower() == HERALD_ROLE_NAME.lower(), guild.roles)
+            if role and role not in member.roles:
+                try:
+                    await member.add_roles(role, reason="Достигнуто 100+ Pts")
+                except discord.Forbidden:
+                    print(f"Недостаточно прав для выдачи роли {role.name} пользователю {member.display_name}")
+                except Exception as e:
+                    print(f"Ошибка при выдаче роли: {e}")
+
+
+# --- ПРОВЕРКА РОЛИ MATCHMAKING MOD ---
+def has_matchmaking_mod_role():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        if not interaction.guild or not isinstance(interaction.user, discord.Member):
+            return False
+        has_role = any(r.name.lower() == MOD_ROLE_NAME.lower() for r in interaction.user.roles)
+        if not has_role:
+            await interaction.response.send_message(
+                f"❌ У вас нет прав для использования этой команды (требуется роль `{MOD_ROLE_NAME}`).", 
+                ephemeral=True
+            )
+            return False
+        return True
+    return app_commands.check(predicate)
+
+
+# --- MODAL ДЛЯ ОТКЛОНЕНИЯ ---
 class RejectReasonModal(discord.ui.Modal, title="Отклонение результата матча"):
     reason = discord.ui.TextInput(
         label="Причина отклонения",
@@ -145,7 +93,8 @@ class RejectReasonModal(discord.ui.Modal, title="Отклонение резул
         
         async with async_session() as session:
             stmt = select(Match).where(Match.id == self.match_id)
-            match = (await session.execute(stmt)).scalar_one_or_none()
+            res = await session.execute(stmt)
+            match = res.scalar_one_or_none()
             
             if not match or match.status != MatchStatus.PENDING_MODERATION:
                 await interaction.followup.send("Матч не найден или уже обработан.", ephemeral=True)
@@ -154,10 +103,12 @@ class RejectReasonModal(discord.ui.Modal, title="Отклонение резул
             match.status = MatchStatus.CANCELLED
             await session.commit()
 
+        # Обновляем сообщение модераторов
         embed = interaction.message.embeds[0]
         embed.color = discord.Color.red()
         embed.add_field(name="Статус", value=f"❌ Отклонено ({interaction.user.mention})\n**Причина:** {self.reason.value}", inline=False)
         
+        # Отключаем кнопки
         disabled_view = discord.ui.View()
         for item in interaction.message.components:
             for child in item.children:
@@ -167,6 +118,8 @@ class RejectReasonModal(discord.ui.Modal, title="Отклонение резул
         await interaction.message.edit(embed=embed, view=disabled_view)
         await interaction.followup.send(f"Матч #{self.match_id} успешно отклонён.", ephemeral=True)
 
+
+# --- VIEW ДЛЯ МОДЕРАЦИИ ---
 class ModerationView(discord.ui.View):
     def __init__(self, match_id: int, winner_team: int):
         super().__init__(timeout=None)
@@ -185,14 +138,16 @@ class ModerationView(discord.ui.View):
                 await interaction.followup.send("Матч не найден или уже обработан.", ephemeral=True)
                 return
 
+            # Загружаем участников
             t1_users = [(await get_or_create_user(session, uid)) for uid in match.team1]
             t2_users = [(await get_or_create_user(session, uid)) for uid in match.team2]
 
             t1_ratings = [u.rating for u in t1_users]
             t2_ratings = [u.rating for u in t2_users]
 
-            delta_t1, delta_t2 = await calculate_elo_updates(t1_ratings, t2_ratings, self.winner_team)
+            delta_t1, delta_t2 = await calculate_pts_updates(t1_ratings, t2_ratings, self.winner_team)
 
+            # Обновление Команды 1
             for u in t1_users:
                 old_r = u.rating
                 u.rating += delta_t1
@@ -201,7 +156,9 @@ class ModerationView(discord.ui.View):
                 else:
                     u.losses += 1
                 session.add(RatingLog(match_id=match.id, user_id=u.discord_id, old_rating=old_r, new_rating=u.rating, delta=delta_t1))
+                await check_and_assign_herald_role(interaction.guild, u.discord_id, u.rating)
 
+            # Обновление Команды 2
             for u in t2_users:
                 old_r = u.rating
                 u.rating += delta_t2
@@ -210,15 +167,17 @@ class ModerationView(discord.ui.View):
                 else:
                     u.losses += 1
                 session.add(RatingLog(match_id=match.id, user_id=u.discord_id, old_rating=old_r, new_rating=u.rating, delta=delta_t2))
+                await check_and_assign_herald_role(interaction.guild, u.discord_id, u.rating)
 
             match.status = MatchStatus.COMPLETED
             await session.commit()
 
+        # Обновление UI у модератора
         embed = interaction.message.embeds[0]
         embed.color = discord.Color.green()
         embed.add_field(
             name="Статус", 
-            value=f"✅ Подтверждено ({interaction.user.mention})\n**Изменения рейтинга:** T1 ({delta_t1:+d}), T2 ({delta_t2:+d})", 
+            value=f"✅ Подтверждено ({interaction.user.mention})\n**Изменения Pts:** T1 ({delta_t1:+d}), T2 ({delta_t2:+d})", 
             inline=False
         )
 
@@ -234,6 +193,8 @@ class ModerationView(discord.ui.View):
     async def reject(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(RejectReasonModal(self.match_id))
 
+
+# --- VIEW ДЛЯ ПРИНЯТИЯ МАТЧА ---
 class MatchAcceptView(discord.ui.View):
     def __init__(self, match_id: int, required_users: List[int]):
         super().__init__(timeout=300)
@@ -254,39 +215,60 @@ class MatchAcceptView(discord.ui.View):
         self.accepted_users.add(interaction.user.id)
         await interaction.response.send_message("Вы подтвердили участие!", ephemeral=True)
 
+        # Проверка: все ли приняли?
         if self.accepted_users == self.required_users:
             self.stop()
+            guild = interaction.guild
+            category = interaction.channel.category if interaction.channel else None
+
             async with async_session() as session:
                 stmt = select(Match).where(Match.id == self.match_id)
                 match = (await session.execute(stmt)).scalar_one()
                 match.status = MatchStatus.IN_PROGRESS
 
-                channel = interaction.channel
-                thread = await channel.create_thread(
-                    name=f"Матч #{self.match_id} ({match.mode})",
-                    type=discord.ChannelType.private_thread,
-                    invitable=False
+                # Настройка прав для нового текстового канала match-{id}
+                overwrites = {
+                    guild.default_role: discord.PermissionOverwrite(read_messages=False),
+                    guild.me: discord.PermissionOverwrite(read_messages=True, send_messages=True)
+                }
+
+                # Добавляем участников матча
+                for uid in self.required_users:
+                    member = guild.get_member(uid)
+                    if member:
+                        overwrites[member] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+                # Добавляем роль модератора
+                mod_role = discord.utils.find(lambda r: r.name.lower() == MOD_ROLE_NAME.lower(), guild.roles)
+                if mod_role:
+                    overwrites[mod_role] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
+
+                # Создание текстового канала с названием match-айди
+                channel_name = f"match-{match.id}"
+                match_channel = await guild.create_text_channel(
+                    name=channel_name,
+                    category=category,
+                    overwrites=overwrites
                 )
-                
-                match.thread_id = thread.id
+
+                match.channel_id = match_channel.id
                 await session.commit()
 
-                for uid in self.required_users:
-                    user_obj = channel.guild.get_member(uid)
-                    if user_obj:
-                        await thread.add_user(user_obj)
+                await match_channel.send(
+                    f"🎮 **Матч #{self.match_id} начался!**\nСостав участников готов. После завершения отправьте результат с помощью команды `/submit_result`."
+                )
 
-                await thread.send(f"🎮 **Матч #{self.match_id} начался!**\nСостав участников готов. После завершения отправьте результат с помощью команды `/submit_result`.")
-
+            # Обновляем эмбед сообщения лобби
             embed = interaction.message.embeds[0]
             embed.title = f"Матч #{self.match_id} — В процессе"
             embed.color = discord.Color.gold()
-            embed.set_field_at(0, name="Статус", value="🟢 Все игроки приняли. Матч перенесён в ветку!", inline=False)
+            embed.set_field_at(0, name="Статус", value=f"🟢 Все игроки приняли. Создан канал {match_channel.mention}!", inline=False)
             
             button.disabled = True
             button.label = "Игра началась"
             button.style = discord.ButtonStyle.success
             await interaction.message.edit(embed=embed, view=self)
+
 
 # --- BOT CLIENT ---
 class MatchmakingBot(commands.Bot):
@@ -299,14 +281,69 @@ class MatchmakingBot(commands.Bot):
 
     async def setup_hook(self):
         await init_db()
-        guild = discord.Object(id=GUILD_ID)
-        self.tree.copy_global_to(guild=guild)
-        await self.tree.sync(guild=guild)
-        print("Команды синхронизированы на сервер и БД инициализирована.")
+        await self.tree.sync()
+        print("Команды синхронизированы и БД инициализирована.")
+
 
 bot = MatchmakingBot()
 
-# --- SLASH COMMANDS ---
+
+# --- COMMANDS FOR MODERATORS ---
+
+@bot.tree.command(name="deleted_channel", description="Удалить указанный канал (Только для Matchmaking Mod)")
+@has_matchmaking_mod_role()
+async def deleted_channel(interaction: discord.Interaction, channel_name_or_mention: str):
+    guild = interaction.guild
+    if not guild:
+        await interaction.response.send_message("Эта команда доступна только на сервере.", ephemeral=True)
+        return
+
+    # Очищаем ввод от символов упоминания <#id>
+    clean_input = channel_name_or_mention.strip("<#> ").lower()
+
+    target_channel = None
+    for ch in guild.channels:
+        if str(ch.id) == clean_input or ch.name.lower() == clean_input:
+            target_channel = ch
+            break
+
+    if not target_channel:
+        await interaction.response.send_message(f"Канал `{channel_name_or_mention}` не найден.", ephemeral=True)
+        return
+
+    try:
+        ch_name = target_channel.name
+        await target_channel.delete(reason=f"Удалено пользователем {interaction.user.display_name} через /deleted_channel")
+        await interaction.response.send_message(f"✅ Канал `#{ch_name}` успешно удалён.", ephemeral=True)
+    except discord.Forbidden:
+        await interaction.response.send_message("❌ У бота недостаточно прав для удаления этого канала.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Произошла ошибка при удалении: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="fix_pts", description="Изменить Pts игрока (Только для Matchmaking Mod)")
+@has_matchmaking_mod_role()
+async def fix_pts(interaction: discord.Interaction, user: discord.User, new_pts: int):
+    async with async_session() as session:
+        db_user = await get_or_create_user(session, user.id)
+        old_pts = db_user.rating
+        delta = new_pts - old_pts
+        
+        db_user.rating = new_pts
+        session.add(RatingLog(match_id=None, user_id=user.id, old_rating=old_pts, new_rating=new_pts, delta=delta))
+        await session.commit()
+
+    if interaction.guild:
+        await check_and_assign_herald_role(interaction.guild, user.id, new_pts)
+
+    await interaction.response.send_message(
+        f"🛠️ Рейтинг <@{user.id}> успешно изменен: **{old_pts} Pts** ➔ **{new_pts} Pts** (Δ {delta:+d}).", 
+        ephemeral=True
+    )
+
+
+# --- GENERAL SLASH COMMANDS ---
+
 @bot.tree.command(name="create_match", description="Создать рейтинговый матч")
 @app_commands.choices(mode=[
     app_commands.Choice(name="1v1", value="1v1"),
@@ -322,7 +359,7 @@ async def create_match(
     if mode.value == "1v1":
         team1 = [interaction.user.id]
         team2 = [opponent1.id]
-    else:
+    else:  # 2v2
         if not teammate or not opponent2:
             await interaction.response.send_message("Для режима 2v2 необходимо указать всех участников (teammate, opponent1, opponent2)!", ephemeral=True)
             return
@@ -358,6 +395,7 @@ async def create_match(
     view = MatchAcceptView(match_id=match_id, required_users=all_players)
     await interaction.response.send_message(embed=embed, view=view)
 
+
 @bot.tree.command(name="submit_result", description="Отправить скриншот-подтверждение и итоговый результат")
 async def submit_result(
     interaction: discord.Interaction, 
@@ -388,13 +426,14 @@ async def submit_result(
             return
 
         if match.status != MatchStatus.IN_PROGRESS:
-            await interaction.followup.send(f"Нельзя отправить результат для матча в этом статусе.", ephemeral=True)
+            await interaction.followup.send(f"Нельзя отправить результат для матча в статусе {match.status.value}.", ephemeral=True)
             return
 
         match.status = MatchStatus.PENDING_MODERATION
         match.proof_url = proof.url
         await session.commit()
 
+    # Отправка модераторам
     mod_channel = interaction.guild.get_channel(MODERATION_CHANNEL_ID)
     if mod_channel:
         mod_embed = discord.Embed(
@@ -412,6 +451,7 @@ async def submit_result(
 
     await interaction.followup.send("Результат отправлен на проверку модераторам!", ephemeral=True)
 
+
 @bot.tree.command(name="profile", description="Просмотр профиля и рейтинга игрока")
 async def profile(interaction: discord.Interaction, user: Optional[discord.User] = None):
     target = user or interaction.user
@@ -419,6 +459,7 @@ async def profile(interaction: discord.Interaction, user: Optional[discord.User]
     async with async_session() as session:
         db_user = await get_or_create_user(session, target.id)
         
+        # Расчет места в ладдере
         rank_stmt = select(func.count()).where(User.rating > db_user.rating)
         rank_res = await session.execute(rank_stmt)
         rank = rank_res.scalar_one() + 1
@@ -428,35 +469,12 @@ async def profile(interaction: discord.Interaction, user: Optional[discord.User]
 
     embed = discord.Embed(title=f"Профиль {target.display_name}", color=discord.Color.blue())
     embed.set_thumbnail(url=target.display_avatar.url)
-    embed.add_field(name="Рейтинг Elo", value=f"🏆 **{db_user.rating}** (Место: #{rank})", inline=False)
+    embed.add_field(name="Рейтинг Pts", value=f"🏆 **{db_user.rating} Pts** (Место: #{rank})", inline=False)
     embed.add_field(name="Победы / Поражения", value=f"📈 {db_user.wins} / 📉 {db_user.losses}", inline=True)
     embed.add_field(name="Винрейт", value=f"🎯 {winrate:.1f}%", inline=True)
 
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="leaderboard", description="Топ-10 игроков сервера")
-async def leaderboard(interaction: discord.Interaction):
-    async with async_session() as session:
-        stmt = select(User).order_by(desc(User.rating)).limit(10)
-        top_users = (await session.execute(stmt)).scalars().all()
 
-    embed = discord.Embed(title="🏆 Лидерборд — Топ 10 Игроков", color=discord.Color.gold())
-    
-    description_lines = []
-    for idx, u in enumerate(top_users, start=1):
-        medal = "🥇" if idx == 1 else "🥈" if idx == 2 else "🥉" if idx == 3 else f"`#{idx}`"
-        description_lines.append(f"{medal} <@{u.discord_id}> — **{u.rating} Elo** (Побед: {u.wins} | Ссыграно: {u.wins + u.losses})")
+@bot.tree.command(name
 
-    embed.description = "\n".join(description_lines) if description_lines else "Таблица лидеров пуста."
-    await interaction.response.send_message(embed=embed)
-
-# --- ВЕБ-СЕРВЕР ДЛЯ РАБОТЫ НА RENDER ---
-def run_web_server():
-    port = int(os.environ.get("PORT", 10000))
-    handler = http.server.SimpleHTTPRequestHandler
-    with socketserver.TCPServer(("", port), handler) as httpd:
-        httpd.serve_forever()
-
-if __name__ == "__main__":
-    threading.Thread(target=run_web_server, daemon=True).start()
-    bot.run(TOKEN)
