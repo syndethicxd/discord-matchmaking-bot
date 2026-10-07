@@ -430,4 +430,5 @@ async def deleted_channel(interaction: discord.Interaction, channel_name_or_ment
     except discord.Forbidden:
         await interaction.response.send_message("❌ У бота недостаточно прав для удаления этого канала.", ephemeral=True)
     except Exception as e:
-        await interaction.response.send_message(f"❌ Произошла ош
+        await interaction.response.send_message(f"❌ Произошла ошибка при удалении: {e}", ephemeral=True)
+        
