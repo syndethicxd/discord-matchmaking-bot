@@ -436,4 +436,7 @@ async def leaderboard(interaction: discord.Interaction):
         name = member.display_name if member else f"User ID: {u_id}"
         total_games = stats["wins"] + stats["losses"]
         winrate = calculate_winrate(stats["wins"], stats["losses"])
-        description_text += f"**#{rank} {name}** — `{stats['pts']
+        description_text += f"**#{rank} {name}** — `{stats['pts']} PTS` | Игр: `{total_games}` | WR: `{winrate}%`\n"
+
+    embed.description = description_text
+    await interaction.response.send_message(embed=embed)
