@@ -475,6 +475,3 @@ async def profile(interaction: discord.Interaction, user: Optional[discord.User]
 
     await interaction.response.send_message(embed=embed)
 
-
-@bot.tree.command(name
-
