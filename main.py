@@ -13,11 +13,11 @@ from discord.ext import commands
 MOD_ROLE_NAME = "matchmaking mod"
 HERALD_ROLE_NAME = "herald"
 
-MOD_PROOF_CHANNEL_ID = 1557114424576319598  # Замени на ID своего канала
-LOG_CHANNEL_ID = 1557311338378694667        # Замени на ID своего канала
+MOD_PROOF_CHANNEL_ID = 1557114424576319598  # Укажи ID канала для доказательств
+LOG_CHANNEL_ID = 1557311338378694667        # Укажи ID канала для логов
 
 # ---------------------------------------------------------------------------
-# HTTP SERVER FOR RENDER
+# HTTP SERVER FOR RENDER (Keep-Alive)
 # ---------------------------------------------------------------------------
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
@@ -30,15 +30,14 @@ class HealthCheckHandler(BaseHTTPRequestHandler):
         return
 
 def run_health_check_server():
-    try:
-        port = int(os.getenv("PORT", 8080))
-        server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
-        print(f">>> HTTP Сервер запущен на порту {port}")
-        server.serve_forever()
-    except Exception as e:
-        print(f"HTTP Server Exception: {e}")
+    port = int(os.getenv("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    print(f">>> Web Server listening on port {port}")
+    server.serve_forever()
 
-threading.Thread(target=run_health_check_server, daemon=True).start()
+# Запускаем HTTP веб-сервер в отдельном потоке
+server_thread = threading.Thread(target=run_health_check_server, daemon=True)
+server_thread.start()
 
 # ---------------------------------------------------------------------------
 # DATA & HELPER FUNCTIONS
@@ -59,7 +58,6 @@ def calculate_winrate(wins: int, losses: int) -> float:
     return round((wins / total) * 100, 1)
 
 async def check_and_grant_herald_role(member: discord.Member, pts: int):
-    """Выдача роли herald при достижении 100+ Pts"""
     if pts >= 100:
         role = discord.utils.find(lambda r: r.name.lower() == HERALD_ROLE_NAME.lower(), member.guild.roles)
         if role and role not in member.roles:
@@ -69,7 +67,6 @@ async def check_and_grant_herald_role(member: discord.Member, pts: int):
                 print(f"Ошибка при выдаче роли {HERALD_ROLE_NAME}: {e}")
 
 async def send_log(guild: discord.Guild, title: str, description: str, color: discord.Color = discord.Color.blue()):
-    """Отправка эмбеда с логом в указанный канал логов."""
     if not LOG_CHANNEL_ID or LOG_CHANNEL_ID == 123456789012345678:
         return
     log_channel = guild.get_channel(LOG_CHANNEL_ID)
@@ -107,7 +104,7 @@ class VerdictModal(discord.ui.Modal, title="Вердикт проверки"):
     verdict = discord.ui.TextInput(
         label="Вердикт",
         style=discord.TextStyle.paragraph,
-        placeholder="Введите вердикт (например: Оправдан / Забанен)...",
+        placeholder="Введите вердикт...",
         required=True,
         max_length=1000
     )
@@ -197,9 +194,7 @@ class ModProofReviewView(discord.ui.View):
 
         await interaction.response.send_message(f"✅ Результат одобрен. +15 Pts выслано {self.winner.mention}.", ephemeral=True)
 
-        players_mentions = []
-        for p in self.players:
-            players_mentions.append(p.mention)
+        players_mentions = [p.mention for p in self.players]
         players_str = " vs ".join(players_mentions)
 
         await send_log(
@@ -234,9 +229,7 @@ class ModProofReviewView(discord.ui.View):
 
         await interaction.response.send_message("❌ Доказательство отклонено.", ephemeral=True)
 
-        players_mentions = []
-        for p in self.players:
-            players_mentions.append(p.mention)
+        players_mentions = [p.mention for p in self.players]
         players_str = " vs ".join(players_mentions)
 
         await send_log(
@@ -328,9 +321,7 @@ class YoutubeProofModal(discord.ui.Modal, title="Завершение дуэли
             await interaction.response.send_message("❌ Ошибка: Канал доказательств не найден! Обратитесь к администратору.", ephemeral=True)
             return
 
-        players_mentions = []
-        for p in self.players:
-            players_mentions.append(p.mention)
+        players_mentions = [p.mention for p in self.players]
         players_str = " vs ".join(players_mentions)
 
         embed = discord.Embed(
@@ -402,11 +393,7 @@ class ActiveMatchView(discord.ui.View):
             await interaction.response.send_message("❌ Вы не являетесь участником матча!", ephemeral=True)
             return
 
-        opponents = []
-        for p in self.players:
-            if p.id != interaction.user.id:
-                opponents.append(p)
-
+        opponents = [p for p in self.players if p.id != interaction.user.id]
         opponents_mentions = " ".join([p.mention for p in opponents])
         
         view = MatchCancelView(allowed_users=opponents)
@@ -462,3 +449,14 @@ class MatchInviteView(discord.ui.View):
         current_match_id = match_counter
         channel_name = f"match-{current_match_id}"
         match_counter += 1
+
+        match_channel = await guild.create_text_channel(
+            name=channel_name,
+            overwrites=overwrites,
+            topic=f"Режим: [{self.mode}] | Карта: {self.location} | Оружие: {self.weapon}"
+        )
+
+        players_mentions = [p.mention for p in self.players]
+        players_list_str = " vs ".join(players_mentions)
+
+       
