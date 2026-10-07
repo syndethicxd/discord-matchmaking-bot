@@ -28,12 +28,11 @@ def run_health_check_server():
         print(f"HTTP Server Exception: {e}")
 
 # ---------------------------------------------------------------------------
-# DATA & IN-MEMORY DATABASE (Хранилище статистики и нумерация матчей)
+# DATA & IN-MEMORY DATABASE
 # ---------------------------------------------------------------------------
 
 match_counter = 1  # Глобальный счетчик для нумерации дуэлей (match-1, match-2...)
 
-# Простая база данных в памяти (при необходимости можно подключить SQLite)
 user_data = {}
 
 def get_user_stats(user_id: int):
@@ -47,7 +46,6 @@ def calculate_winrate(wins: int, losses: int) -> float:
         return 0.0
     return round((wins / total) * 100, 1)
 
-# Проверка роли Matchmaking Mod
 def is_matchmaking_mod():
     async def predicate(interaction: discord.Interaction):
         has_role = any(role.name == "Matchmaking Mod" for role in interaction.user.roles)
@@ -157,7 +155,6 @@ class MatchInviteView(discord.ui.View):
         for player in self.players:
             overwrites[player] = discord.PermissionOverwrite(read_messages=True, send_messages=True)
 
-        # Название канала с нумерацией по возрастанию (match-1, match-2...)
         channel_name = f"match-{match_counter}"
         match_counter += 1
 
@@ -187,7 +184,7 @@ class MatchInviteView(discord.ui.View):
         self.stop()
 
 # ---------------------------------------------------------------------------
-# MATCH SETUP VIEWS (1v1 & 2v2)
+# MATCH SETUP VIEWS
 # ---------------------------------------------------------------------------
 
 class Setup1v1View(discord.ui.View):
@@ -334,7 +331,7 @@ class Setup2v2View(discord.ui.View):
         await interaction.response.send_message("✅ Вызов на 2v2 успешно отправлен!", ephemeral=True)
 
 # ---------------------------------------------------------------------------
-# MAIN PANEL VIEW (Со всеми кнопками)
+# MAIN PANEL VIEW
 # ---------------------------------------------------------------------------
 
 class MainPanelView(discord.ui.View):
@@ -366,7 +363,6 @@ class MainPanelView(discord.ui.View):
         embed.add_field(name="✅ Победы", value=f"**{stats['wins']}**", inline=True)
         embed.add_field(name="❌ Поражения", value=f"**{stats['losses']}**", inline=True)
 
-        # Видно ТОЛЬКО человеку, который нажал на кнопку
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # ---------------------------------------------------------------------------
@@ -427,7 +423,6 @@ async def leaderboard(interaction: discord.Interaction):
         await interaction.response.send_message("🏆 **Таблица лидеров пока пуста.**", ephemeral=True)
         return
 
-    # Сортировка по PTS по убыванию
     sorted_users = sorted(user_data.items(), key=lambda item: item[1]["pts"], reverse=True)[:10]
 
     embed = discord.Embed(
@@ -436,4 +431,9 @@ async def leaderboard(interaction: discord.Interaction):
     )
 
     description_text = ""
-    for rank, (u_id, st
+    for rank, (u_id, stats) in enumerate(sorted_users, start=1):
+        member = interaction.guild.get_member(u_id)
+        name = member.display_name if member else f"User ID: {u_id}"
+        total_games = stats["wins"] + stats["losses"]
+        winrate = calculate_winrate(stats["wins"], stats["losses"])
+        description_text += f"**#{rank} {name}** — `{stats['pts']
