@@ -451,29 +451,24 @@ async def submit_result(
     await interaction.followup.send("Результат отправлен на проверку модераторам!", ephemeral=True)
 
 
-@bot.tree.command(name="profile", description="Просмотр профиля и рейтинга игрока")
-async def profile(interaction: discord.Interaction, user: Optional[discord.User] = None):
-    target = user or interaction.user
-
+@bot.tree.command(name="leaderboard", description="Топ-10 игроков сервера")
+async def leaderboard(interaction: discord.Interaction):
     async with async_session() as session:
-        db_user = await get_or_create_user(session, target.id)
-        
-        # Расчет места в ладдере
-        rank_stmt = select(func.count()).where(User.rating > db_user.rating)
-        rank_res = await session.execute(rank_stmt)
-        rank = rank_res.scalar_one() + 1
+        stmt = select(User).order_by(desc(User.rating)).limit(10)
+        top_users = (await session.execute(stmt)).scalars().all()
 
-    total_games = db_user.wins + db_user.losses
-    winrate = (db_user.wins / total_games * 100) if total_games > 0 else 0.0
+    embed = discord.Embed(title="🏆 Лидерборд — Топ 10 Игроков", color=discord.Color.gold())
+    
+    description_lines = []
+    for idx, u in enumerate(top_users, start=1):
+        medal = "🥇" if idx == 1 else "🥈" if idx == 2 else "🥉" if idx == 3 else f"`#{idx}`"
+        description_lines.append(f"{medal} <@{u.discord_id}> — **{u.rating} Pts** (Побед: {u.wins} | Ссыграно: {u.wins + u.losses})")
 
-    embed = discord.Embed(title=f"Профиль {target.display_name}", color=discord.Color.blue())
-    embed.set_thumbnail(url=target.display_avatar.url)
-    embed.add_field(name="Рейтинг Pts", value=f"🏆 **{db_user.rating} Pts** (Место: #{rank})", inline=False)
-    embed.add_field(name="Победы / Поражения", value=f"📈 {db_user.wins} / 📉 {db_user.losses}", inline=True)
-    embed.add_field(name="Винрейт", value=f"🎯 {winrate:.1f}%", inline=True)
-
+    embed.description = "\n".join(description_lines) if description_lines else "Таблица лидеров пуста."
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="leaderboard", description="Топ-10 игроков сервера")
-async def leaderboard(interaction: discord
+if __name__ == "__main__":
+    if not TOKEN:
+        raise ValueError("Токен DISCORD_TOKEN не найден! Укажите его в Environment Variables на Render.")
+    asyncio.run(bot.start(TOKEN))
