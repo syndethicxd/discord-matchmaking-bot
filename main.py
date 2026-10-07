@@ -472,4 +472,5 @@ async def create_match(
         match_id = match.id
 
     t1_mentions = ", ".join([f"<@{uid}>" for uid in team1])
-    t2_mentions = ", ".join([
+    t2_mentions = ", ".join([f"<@{m_id}>" for m_id in match["team2"]])
+    
