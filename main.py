@@ -471,6 +471,6 @@ async def create_match(
         await session.commit()
         match_id = match.id
 
-    t1_mentions = ", ".join([f"<@{uid}>" for uid in team1])
-    t2_mentions = ", ".join([f"<@{m_id}>" for m_id in match["team2"]])
-    
+            t1_mentions = ", ".join([f"<@{uid}>" for uid in team1])
+        t2_mentions = ", ".join([f"<@{m_id}>" for m_id in match["team2"]])
+        
