@@ -471,5 +471,18 @@ async def create_match(
         await session.commit()
         match_id = match.id
 
-    t1_mentions = ", ".join([f"<@{uid}>" for uid in team1])
-    t2_mentions = ", ".join([f"<@{uid
+        t1_mentions = ", ".join([f"<@{uid}>" for uid in team1])
+    t2_mentions = ", ".join([f"<@{uid}>" for uid in team2])
+
+    embed = discord.Embed(
+        title=f"Создано лобби матча #{match_id} [{mode.value}]",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="Статус", value="⏳ Ожидание подтверждения участников...", inline=False)
+    embed.add_field(name="Команда 1", value=t1_mentions, inline=True)
+    embed.add_field(name="Команда 2", value=t2_mentions, inline=True)
+    embed.set_footer(text="Все участники должны нажать кнопку ниже.")
+
+    view = MatchAcceptView(match_id=match_id, required_users=all_players)
+    await interaction.response.send_message(embed=embed, view=view)
+    
