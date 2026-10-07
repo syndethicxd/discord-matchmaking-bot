@@ -431,4 +431,12 @@ async def deleted_channel(interaction: discord.Interaction, channel_name_or_ment
         await interaction.response.send_message("❌ У бота недостаточно прав для удаления этого канала.", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"❌ Произошла ошибка при удалении: {e}", ephemeral=True)
+import os
+TOKEN = os.getenv("DISCORD_TOKEN")
+
+if __name__ == "__main__":
+    if TOKEN:
+        bot.run(TOKEN)
+    else:
+        print("Ошибка: Токен DISCORD_TOKEN не найден!")
         
