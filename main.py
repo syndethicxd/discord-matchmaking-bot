@@ -459,4 +459,5 @@ class MatchInviteView(discord.ui.View):
             name=channel_name,
             overwrites=overwrites,
             topic=f"Режим: [{self.mode}] | Карта: {self.location} | Оружие: {self.weapon}"
-    
+        )
+        
